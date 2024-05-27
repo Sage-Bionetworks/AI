@@ -18,5 +18,18 @@ This is to document the exploration of AWS bedrock and the resources created
 
 ## Synapse KB
 
-The creation of the NF knowledge base motivated me to try and create knowledgebases for Synapse.  I extracted all the public project wikis and created uploaded all the markdown files into an S3 bucket.  From there, I created a knowledge base and agent.
+The creation of the NF knowledge base motivated me to try and create knowledgebases for Synapse.
+
+* Public Synapse Project wikis
+* Synapse docs
+* Discussion forum text
+
+### Streamlit
+
+This is a lightweight prototype that queries the knowledge base with streamlit
+
+```
+pip install streamlit boto3
+streamlit run synapse-docs-chat.py
+```
 
