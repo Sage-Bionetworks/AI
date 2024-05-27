@@ -33,3 +33,10 @@ pip install streamlit boto3
 streamlit run synapse-docs-chat.py
 ```
 
+## Infra
+
+Bedrock requires AWS infrastructure.  To do so, I leveraged AWS CDK to create all resources.
+
+```
+pip install aws-cdk-lib
+```
