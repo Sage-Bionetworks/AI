@@ -64,6 +64,7 @@ def get_all_wiki_pages(syn: Synapse, project_id: str):
         }
         metadata["metadataAttributes"].update(to_pull_annotations)
         metadata_copy = copy.deepcopy(metadata["metadataAttributes"])
+        # bedrock does not play nicely with blank values in the metadata.json file
         for key in metadata_copy.keys():
             if (
                 metadata["metadataAttributes"][key] is None
