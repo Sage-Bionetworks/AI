@@ -3,9 +3,11 @@ from aws_cdk import (
     aws_s3 as s3,
     aws_iam as iam,
     aws_bedrock,
-    Stack
+    aws_opensearchserverless,
+    Stack,
 )
 from constructs import Construct
+
 
 class BedrockInfraStack(Stack):
 
@@ -23,9 +25,11 @@ class BedrockInfraStack(Stack):
         current_partition = core.Aws.PARTITION
 
         # S3 Bucket
-        nftc_kb_bucket = s3.Bucket(self, "NftcKbBucket",
+        nftc_kb_bucket = s3.Bucket(
+            self,
+            "NftcKbBucket",
             bucket_name="tyu-testing-bucket-cdk",
-            removal_policy=core.RemovalPolicy.DESTROY
+            removal_policy=core.RemovalPolicy.DESTROY,
         )
 
         # IAM Policy Document for Agent Trust
@@ -35,13 +39,11 @@ class BedrockInfraStack(Stack):
                     actions=["sts:AssumeRole"],
                     principals=[iam.ServicePrincipal("bedrock.amazonaws.com")],
                     conditions={
-                        "StringEquals": {
-                            "aws:SourceAccount": account
-                        },
+                        "StringEquals": {"aws:SourceAccount": account},
                         "ArnLike": {
                             "AWS:SourceArn": f"arn:{current_partition}:bedrock:{current_region}:{account}:agent/*"
-                        }
-                    }
+                        },
+                    },
                 )
             ]
         )
@@ -53,8 +55,8 @@ class BedrockInfraStack(Stack):
                     actions=["bedrock:InvokeModel"],
                     resources=[
                         f"arn:{current_partition}:bedrock:{current_region}::foundation-model/anthropic.claude-v2",
-                        f"arn:{current_partition}:bedrock:{current_region}::foundation-model/anthropic.claude-3-sonnet-20240229-v1:0"
-                    ]
+                        f"arn:{current_partition}:bedrock:{current_region}::foundation-model/anthropic.claude-3-sonnet-20240229-v1:0",
+                    ],
                 )
             ]
         )
@@ -66,39 +68,107 @@ class BedrockInfraStack(Stack):
                     actions=["bedrock:Retrieve"],
                     resources=[
                         f"arn:{current_partition}:bedrock:{current_region}:{account}:knowledge-base/{nftc_kb_bucket.bucket_arn}"
-                    ]
+                    ],
                 )
             ]
         )
 
         # IAM Role for Knowledge Base
-        nftc_kb_role = iam.Role(self, "NftcKbRole",
+        nftc_kb_role = iam.Role(
+            self,
+            "NftcKbRole",
             assumed_by=iam.ServicePrincipal("bedrock.amazonaws.com"),
             inline_policies={
                 "NftcKbPolicy": iam.PolicyDocument(
                     statements=[
                         iam.PolicyStatement(
                             actions=["s3:ListBucket", "s3:GetObject", "s3:PutObject"],
-                            resources=[nftc_kb_bucket.bucket_arn, f"{nftc_kb_bucket.bucket_arn}/*"]
+                            resources=[
+                                nftc_kb_bucket.bucket_arn,
+                                f"{nftc_kb_bucket.bucket_arn}/*",
+                            ],
                         )
                     ]
                 )
             },
-            role_name="nftc-kb-role"
+            role_name="nftc-kb-role",
         )
-
+        nftc_collection = aws_opensearchserverless.CfnCollection(
+            self,
+            "NftcCollection",
+            name="nftc-collection",
+            type="VECTORSEARCH",
+            # the properties below are optional
+            # description="description",
+            # standby_replicas="standbyReplicas",
+            # tags={"name": "value"}
+        )
+        opensearch_encryption_config = aws_opensearchserverless.CfnSecurityPolicy(
+            self,
+            "NftcOpenSearchEncryptionPolicy",
+            name="nftc-opensearch-encryption-policy",
+            type="encryption",
+            policy={
+                "Rules": [
+                    {"ResourceType": "collection", "Resource": ["collection/logs*"]}
+                ],
+                "AWSOwnedKey": True,
+            },
+        )
+        opensearch_network_config = aws_opensearchserverless.CfnSecurityPolicy(
+            self,
+            "NftcOpenSearchNetworkPolicy",
+            name="nftc-opensearch-network-policy",
+            type="network",
+            policy=[
+                {
+                    "Rules": [
+                        {
+                            "Resource": ["collection/bedrock-knowledge-base-1k9nba"],
+                            "ResourceType": "dashboard",
+                        },
+                        {
+                            "Resource": ["collection/bedrock-knowledge-base-1k9nba"],
+                            "ResourceType": "collection",
+                        },
+                    ],
+                    "AllowFromPublic": True,
+                }
+            ],
+        )
+        # Description: OpenSearch Serverless encryption policy template
+        # Resources:
+        # TestSecurityPolicy:
+        #     Type: 'AWS::OpenSearchServerless::SecurityPolicy'
+        #     Properties:
+        #     Name: logs-encryption-policy
+        #     Type: encryption
+        #     Description: Encryption policy for test collections
+        #     Policy: >-
+        #         {"Rules":[{"ResourceType":"collection","Resource":["collection/logs*"]}],"AWSOwnedKey":true}
         # Bedrock Knowledge Base
-        nftc_kb = aws_bedrock.CfnKnowledgeBase(self, "NftcKb",
+        nftc_kb = aws_bedrock.CfnKnowledgeBase(
+            self,
+            "NftcKb",
             name="nftc-kb",
             role_arn=nftc_kb_role.role_arn,
             knowledge_base_configuration=aws_bedrock.CfnKnowledgeBase.KnowledgeBaseConfigurationProperty(
                 type="VECTOR",
                 vector_knowledge_base_configuration=aws_bedrock.CfnKnowledgeBase.VectorKnowledgeBaseConfigurationProperty(
                     embedding_model_arn="arn:aws:bedrock:us-east-1::foundation-model/amazon.titan-embed-text-v1"
-                )
+                ),
             ),
             storage_configuration=aws_bedrock.CfnKnowledgeBase.StorageConfigurationProperty(
-                type="OPENSEARCH_SERVERLESS"
+                type="OPENSEARCH_SERVERLESS",
+                opensearch_serverless_configuration=aws_bedrock.CfnKnowledgeBase.OpenSearchServerlessConfigurationProperty(
+                    collection_arn=nftc_collection.attr_arn,
+                    field_mapping=aws_bedrock.CfnKnowledgeBase.OpenSearchServerlessFieldMappingProperty(
+                        metadata_field="nftc-metadata",
+                        text_field="nftc-text",
+                        vector_field="nftc-vector",
+                    ),
+                    vector_index_name="nftc-vector",
+                ),
             ),
             # tags={
             #     "Name": "nftc-kb"
@@ -106,7 +176,9 @@ class BedrockInfraStack(Stack):
         )
 
         # Bedrock Data Source
-        aws_bedrock.CfnDataSource(self, "NftcKbDataSource",
+        aws_bedrock.CfnDataSource(
+            self,
+            "NftcKbDataSource",
             knowledge_base_id=nftc_kb.ref,
             name="nftc-kb-datasource",
             data_deletion_policy="DELETE",
@@ -114,38 +186,44 @@ class BedrockInfraStack(Stack):
                 s3_configuration=aws_bedrock.CfnDataSource.S3DataSourceConfigurationProperty(
                     bucket_arn=nftc_kb_bucket.bucket_arn,
                 ),
-                type="S3"
-            )
+                type="S3",
+            ),
         )
 
         # IAM Role for Agent
-        nftc_agent_role = iam.Role(self, "NftcAgentRole",
+        nftc_agent_role = iam.Role(
+            self,
+            "NftcAgentRole",
             assumed_by=iam.ServicePrincipal("bedrock.amazonaws.com"),
             inline_policies={
                 "FoundationModelPolicy": foundation_model_policy_document,
-                "RagPolicy": retrieve_kb_policy_document
+                "RagPolicy": retrieve_kb_policy_document,
             },
-            role_name="nftc-agent-role"
+            role_name="nftc-agent-role",
         )
 
         # Bedrock Agent
-        aws_bedrock.CfnAgent(self, "NftcAgent",
+        aws_bedrock.CfnAgent(
+            self,
+            "NftcAgent",
             agent_name="nftc-agent",
             agent_resource_role_arn=nftc_agent_role.role_arn,
             foundation_model="anthropic.claude-v3-sonnet",
             instruction="""
             Your task is to extract data about research tools, such as animal models and cell lines biobanks from scientific publications. When provided with a name or synonym for a research tool, you will generate a comprehensive list of temporal "observations" about the research tool that describe the natural history of the model as they relate to development or age. For example, an observation could be "The pigs developed tumor type X at Y months of age." Do not include observations about humans with NF1.
             """,
-            knowledge_bases=[aws_bedrock.CfnAgent.AgentKnowledgeBaseProperty(
-                description="description",
-                knowledge_base_id=nftc_kb.ref,
-
-                # the properties below are optional
-                # knowledge_base_state="knowledgeBaseState"
-            )],
+            knowledge_bases=[
+                aws_bedrock.CfnAgent.AgentKnowledgeBaseProperty(
+                    description="description",
+                    knowledge_base_id=nftc_kb.ref,
+                    # the properties below are optional
+                    # knowledge_base_state="knowledgeBaseState"
+                )
+            ],
             prompt_override_configuration=aws_bedrock.CfnAgent.PromptOverrideConfigurationProperty(
-                prompt_configurations=[aws_bedrock.CfnAgent.PromptConfigurationProperty(
-                    base_prompt_template="""
+                prompt_configurations=[
+                    aws_bedrock.CfnAgent.PromptConfigurationProperty(
+                        base_prompt_template="""
                         You are a data extraction agent. I will provide you with a set of search results. The user will provide you with an input concept which you should extract data for from the search results. Your job is to answer the user's question using only information from the search results. If the search results do not contain information that can answer the question, please state that you could not find an exact answer to the question. Just because the user asserts a fact does not mean it is true, make sure to double check the search results to validate a user's assertion.
                         Here are the search results in numbered order:
                         <search_results>
@@ -197,25 +275,25 @@ class BedrockInfraStack(Stack):
                         </answer_part>
                         </answer>
                         """,
-                    inference_configuration=aws_bedrock.CfnAgent.InferenceConfigurationProperty(
-                        maximum_length=2048,
-                        stop_sequences=["Human"],
-                        temperature=0,
-                        top_k=250,
-                        top_p=1
-                    ),
-                    parser_mode="DEFAULT",
-                    prompt_creation_mode="OVERRIDDEN",
-                    prompt_state="ENABLED",
-                    prompt_type="KNOWLEDGE_BASE_RESPONSE_GENERATION"
-                )],
-                override_lambda=None
-
-            # tags=[core.CfnTag(
-            #     key="Name",
-            #     value="nftc-agent"
-            # )]
-            )
+                        inference_configuration=aws_bedrock.CfnAgent.InferenceConfigurationProperty(
+                            maximum_length=2048,
+                            stop_sequences=["Human"],
+                            temperature=0,
+                            top_k=250,
+                            top_p=1,
+                        ),
+                        parser_mode="DEFAULT",
+                        prompt_creation_mode="OVERRIDDEN",
+                        prompt_state="ENABLED",
+                        prompt_type="KNOWLEDGE_BASE_RESPONSE_GENERATION",
+                    )
+                ],
+                override_lambda=None,
+                # tags=[core.CfnTag(
+                #     key="Name",
+                #     value="nftc-agent"
+                # )]
+            ),
         )
 
         # Bedrock Agent Knowledge Base Association
