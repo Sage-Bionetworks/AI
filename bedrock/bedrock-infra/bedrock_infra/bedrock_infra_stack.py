@@ -1,3 +1,5 @@
+import json
+
 import aws_cdk as core
 from aws_cdk import (
     aws_s3 as s3,
@@ -93,6 +95,40 @@ class BedrockInfraStack(Stack):
             },
             role_name="nftc-kb-role",
         )
+        opensearch_encryption_config = aws_opensearchserverless.CfnSecurityPolicy(
+            self,
+            "NftcOpenSearchEncryptionPolicy",
+            name="nftcopensearchencryptionpolicy",
+            type="encryption",
+            policy=json.dumps({
+                "Rules": [
+                    {"ResourceType": "collection", "Resource": [f"collection/nftc-collection"]}
+                ],
+                "AWSOwnedKey": True,
+            }),
+        )
+        opensearch_network_config = aws_opensearchserverless.CfnSecurityPolicy(
+            self,
+            "NftcOpenSearchNetworkPolicy",
+            name="nftcopensearchnetworkpolicy",
+            type="network",
+            # TODO: parametrize collection name
+            policy=json.dumps([
+                {
+                    "Rules": [
+                        {
+                            "Resource": [f"collection/nftc-collection"],
+                            "ResourceType": "dashboard",
+                        },
+                        {
+                            "Resource": [f"collection/nftc-collection"],
+                            "ResourceType": "collection",
+                        },
+                    ],
+                    "AllowFromPublic": True,
+                }
+            ]),
+        )
         nftc_collection = aws_opensearchserverless.CfnCollection(
             self,
             "NftcCollection",
@@ -103,39 +139,8 @@ class BedrockInfraStack(Stack):
             # standby_replicas="standbyReplicas",
             # tags={"name": "value"}
         )
-        opensearch_encryption_config = aws_opensearchserverless.CfnSecurityPolicy(
-            self,
-            "NftcOpenSearchEncryptionPolicy",
-            name="nftc-opensearch-encryption-policy",
-            type="encryption",
-            policy={
-                "Rules": [
-                    {"ResourceType": "collection", "Resource": ["collection/logs*"]}
-                ],
-                "AWSOwnedKey": True,
-            },
-        )
-        opensearch_network_config = aws_opensearchserverless.CfnSecurityPolicy(
-            self,
-            "NftcOpenSearchNetworkPolicy",
-            name="nftc-opensearch-network-policy",
-            type="network",
-            policy=[
-                {
-                    "Rules": [
-                        {
-                            "Resource": ["collection/bedrock-knowledge-base-1k9nba"],
-                            "ResourceType": "dashboard",
-                        },
-                        {
-                            "Resource": ["collection/bedrock-knowledge-base-1k9nba"],
-                            "ResourceType": "collection",
-                        },
-                    ],
-                    "AllowFromPublic": True,
-                }
-            ],
-        )
+        nftc_collection.add_dependency(opensearch_encryption_config)
+        nftc_collection.add_dependency(opensearch_network_config)
         # Description: OpenSearch Serverless encryption policy template
         # Resources:
         # TestSecurityPolicy:
@@ -179,7 +184,7 @@ class BedrockInfraStack(Stack):
         aws_bedrock.CfnDataSource(
             self,
             "NftcKbDataSource",
-            knowledge_base_id=nftc_kb.ref,
+            knowledge_base_id=nftc_kb.attr_knowledge_base_id,
             name="nftc-kb-datasource",
             data_deletion_policy="DELETE",
             data_source_configuration=aws_bedrock.CfnDataSource.DataSourceConfigurationProperty(
@@ -215,7 +220,7 @@ class BedrockInfraStack(Stack):
             knowledge_bases=[
                 aws_bedrock.CfnAgent.AgentKnowledgeBaseProperty(
                     description="description",
-                    knowledge_base_id=nftc_kb.ref,
+                    knowledge_base_id=nftc_kb.attr_knowledge_base_id,
                     # the properties below are optional
                     # knowledge_base_state="knowledgeBaseState"
                 )
