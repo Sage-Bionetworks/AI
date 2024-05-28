@@ -59,10 +59,10 @@ class BedrockInfraStack(Stack):
                         f"arn:{current_partition}:bedrock:{current_region}::foundation-model/anthropic.claude-v2",
                         f"arn:{current_partition}:bedrock:{current_region}::foundation-model/anthropic.claude-3-sonnet-20240229-v1:0",
                     ],
+                    effect=iam.Effect.ALLOW
                 )
             ]
         )
-
         # IAM Policy Document for Retrieve Knowledge Base
         retrieve_kb_policy_document = iam.PolicyDocument(
             statements=[
@@ -71,10 +71,22 @@ class BedrockInfraStack(Stack):
                     resources=[
                         f"arn:{current_partition}:bedrock:{current_region}:{account}:knowledge-base/{nftc_kb_bucket.bucket_arn}"
                     ],
+                    effect=iam.Effect.ALLOW
                 )
             ]
         )
-
+        # IAM Role for Agent
+        nftc_agent_role = iam.Role(
+            self,
+            "NftcAgentRole",
+            assumed_by=iam.ServicePrincipal("bedrock.amazonaws.com"),
+            inline_policies={
+                "FoundationModelPolicy": foundation_model_policy_document,
+                "RagPolicy": retrieve_kb_policy_document,
+            },
+            role_name="nftc-agent-role",
+            # assume_role_policy=agent_trust_policy_document
+        )
         # IAM Role for Knowledge Base
         nftc_kb_role = iam.Role(
             self,
@@ -84,11 +96,33 @@ class BedrockInfraStack(Stack):
                 "NftcKbPolicy": iam.PolicyDocument(
                     statements=[
                         iam.PolicyStatement(
-                            actions=["s3:ListBucket", "s3:GetObject", "s3:PutObject"],
+                            actions=["s3:ListBucket"],
                             resources=[
-                                nftc_kb_bucket.bucket_arn,
-                                f"{nftc_kb_bucket.bucket_arn}/*",
+                                nftc_kb_bucket.bucket_arn
                             ],
+                            effect=iam.Effect.ALLOW
+                        )
+                    ]
+                ),
+                "NftcInvokePolicy": iam.PolicyDocument(
+                    statements=[
+                        iam.PolicyStatement(
+                            actions=["bedrock:InvokeModel"],
+                            resources=[
+                                "arn:aws:bedrock:us-east-1::foundation-model/amazon.titan-embed-text-v1"
+                            ],
+                            effect=iam.Effect.ALLOW
+                        )
+                    ]
+                ),
+                "ApiAccess": iam.PolicyDocument(
+                    statements=[
+                        iam.PolicyStatement(
+                            actions=["aoss:APIAccessAll"],
+                            resources=[
+                               "*"
+                            ],
+                            effect=iam.Effect.ALLOW
                         )
                     ]
                 )
@@ -141,17 +175,56 @@ class BedrockInfraStack(Stack):
         )
         nftc_collection.add_dependency(opensearch_encryption_config)
         nftc_collection.add_dependency(opensearch_network_config)
-        # Description: OpenSearch Serverless encryption policy template
-        # Resources:
-        # TestSecurityPolicy:
-        #     Type: 'AWS::OpenSearchServerless::SecurityPolicy'
-        #     Properties:
-        #     Name: logs-encryption-policy
-        #     Type: encryption
-        #     Description: Encryption policy for test collections
-        #     Policy: >-
-        #         {"Rules":[{"ResourceType":"collection","Resource":["collection/logs*"]}],"AWSOwnedKey":true}
-        # Bedrock Knowledge Base
+
+        data_access_policy = json.dumps([
+            {
+                "Rules": [
+                    {
+                        "Resource": [
+                            f"collection/nftc-collection"
+                        ],
+                        "Permission": [
+                            "aoss:CreateCollectionItems",
+                            "aoss:DeleteCollectionItems",
+                            "aoss:UpdateCollectionItems",
+                            "aoss:DescribeCollectionItems"
+                        ],
+                        "ResourceType": "collection"
+                    },
+                    {
+                        "Resource": [
+                            f"index/nftc-collection/*"
+                        ],
+                        "Permission": [
+                            "aoss:CreateIndex",
+                            "aoss:DeleteIndex",
+                            "aoss:UpdateIndex",
+                            "aoss:DescribeIndex",
+                            "aoss:ReadDocument",
+                            "aoss:WriteDocument"
+                        ],
+                        "ResourceType": "index"
+                    }
+                ],
+                "Principal": [
+                    nftc_kb_role.role_arn,
+                    "arn:aws:sts::766808016710:assumed-role/AWSReservedSSO_Administrator_e1acc9f84863534e/thomas.yu@sagebase.org"
+                ],
+                "Description": "data-access-rule"
+            }
+        ], indent=2)
+
+        #XXX: max length of policy name is 32
+        data_access_policy_name = f"nftc-collection-policy"
+        assert len(data_access_policy_name) <= 32, f"Data Access Policy Name: {data_access_policy_name}"
+
+        cfn_access_policy = aws_opensearchserverless.CfnAccessPolicy(self, "OpssDataAccessPolicy",
+            name=data_access_policy_name,
+            description="Policy for data access",
+            policy=data_access_policy,
+            type="data"
+        )
+
         nftc_kb = aws_bedrock.CfnKnowledgeBase(
             self,
             "NftcKb",
@@ -163,6 +236,7 @@ class BedrockInfraStack(Stack):
                     embedding_model_arn="arn:aws:bedrock:us-east-1::foundation-model/amazon.titan-embed-text-v1"
                 ),
             ),
+            # TODO need to create the opensearch index
             storage_configuration=aws_bedrock.CfnKnowledgeBase.StorageConfigurationProperty(
                 type="OPENSEARCH_SERVERLESS",
                 opensearch_serverless_configuration=aws_bedrock.CfnKnowledgeBase.OpenSearchServerlessConfigurationProperty(
@@ -193,18 +267,6 @@ class BedrockInfraStack(Stack):
                 ),
                 type="S3",
             ),
-        )
-
-        # IAM Role for Agent
-        nftc_agent_role = iam.Role(
-            self,
-            "NftcAgentRole",
-            assumed_by=iam.ServicePrincipal("bedrock.amazonaws.com"),
-            inline_policies={
-                "FoundationModelPolicy": foundation_model_policy_document,
-                "RagPolicy": retrieve_kb_policy_document,
-            },
-            role_name="nftc-agent-role",
         )
 
         # Bedrock Agent
