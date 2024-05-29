@@ -56,7 +56,7 @@ if prompt:
         response = invoke_agent(
             agents_runtime_client=runtime_client,
             agent_id="JMQZXOQVRB",
-            agent_alias_id="1EY4IHHBXR",
+            agent_alias_id="ZNHS7HHVIL",
             session_id=str(uuid.uuid1()),
             prompt=prompt,
         )
