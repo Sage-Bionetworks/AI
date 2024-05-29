@@ -224,7 +224,49 @@ class BedrockInfraStack(Stack):
             policy=data_access_policy,
             type="data"
         )
+        def create_opensearch_index():
+            import boto3
+            import json
 
+            # Initialize the Boto3 client for OpenSearch
+            client = boto3.client('opensearch')
+
+            # Define the index name
+            # index_name = f"{name_prefix}-{name_suffix}"
+
+            # Define the index settings and mappings
+            index_body = {
+                "settings": {
+                    "index.knn": True,
+                },
+                "mappings": {
+                    "properties": {
+                        "nftc-vector": {
+                            "type": "knn_vector",
+                            "dimension": 1536,
+                            "method": {
+                                "name": "hnsw",
+                                "engine": "faiss",
+                                "parameters": {
+                                    "ef_construction": 512,
+                                    "m": 16,
+                                },
+                            },
+                        },
+                    },
+                },
+            }
+
+            # Create the index
+            response = client.create_index(
+                DomainName='your-opensearch-domain',
+                IndexName="nftc-vector",
+                Body=json.dumps(index_body)
+            )
+
+            # Print the response
+            print(response)
+        create_opensearch_index()
         nftc_kb = aws_bedrock.CfnKnowledgeBase(
             self,
             "NftcKb",

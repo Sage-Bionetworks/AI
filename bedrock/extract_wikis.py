@@ -48,13 +48,11 @@ def get_all_wiki_pages(syn: Synapse, project_id: str):
         temp = syn.getWiki(project_id, header_id)
         metadata = {
             "metadataAttributes": {
-                "id": temp["id"],
-                "createdOn": temp["createdOn"],
-                "createdBy": temp["createdBy"],
-                "parentWikiId": temp.get("parentWikiId"),
-                "title": temp.get("title"),
-                "ownerId": temp["ownerId"],
-                "projectName": project_ent["name"],
+                "created_on": temp["createdOn"],
+                "created_by": syn.getUserProfile(temp["createdBy"]).userName,
+                "wiki_url": f"https://www.synapse.org/#!Synapse:{temp['ownerId']}/wiki/{temp['id']}",
+                "synapse_id": temp["ownerId"],
+                "project_name": project_ent["name"],
             }
         }
         # Exclude all annotations with more than one value for now.
@@ -81,7 +79,9 @@ def main():
     # Extracted public projects from snowflake on 5/25/2024
     # select 'syn'||id as id from synapse_data_warehouse.synapse.node_latest where node_type = 'project' and is_public;
     projects = pd.read_csv("public_projects.csv")
-    for project_id in projects["ID"]:
+    projects = pd.read_csv("../test_valid_projects.csv")
+
+    for project_id in projects["SYN_ID"]:
         print(project_id)
         get_all_wiki_pages(syn, project_id)
 
