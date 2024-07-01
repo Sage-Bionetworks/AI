@@ -87,6 +87,7 @@ def my_message_generator(sender, recipient, context):
 initializer = autogen.UserProxyAgent(
     name="Init",
 )
+# TODO: for some reason, it's not chatting with coder more than once...
 coder = autogen.AssistantAgent(
     name="Retrieve_Action_1",
     llm_config=llm_config,
