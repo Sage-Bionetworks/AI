@@ -109,12 +109,32 @@ def main():
     syn = synapseclient.login()
     project_forum = get_project_forum(syn, "syn7222066")
     forum = get_forum(syn, project_forum["id"])
-    for thread in get_forum_threads(syn, forum["id"]):
-        # url = _get_message_url(syn, thread['messageKey'], 'thread')
-        # response = _get_text(url)
-        text = get_text(syn, thread["messageKey"], "thread")
-        with open(f"{thread['id']}.txt", "w") as thread_f:
+    # for thread in get_forum_threads(syn, forum["id"]):
+    #     # url = _get_message_url(syn, thread['messageKey'], 'thread')
+    #     # response = _get_text(url)
+    #     text = get_text(syn, thread["messageKey"], "thread")
+    #     with open(f"{thread['id']}.txt", "w") as thread_f:
 
+    #         author = syn.getUserProfile(thread["createdBy"]).userName
+    #         thread_f.write(f"Thread: {author}")
+    #         thread_f.write("\n")
+    #         thread_f.write(text)
+    #         thread_f.write("\n")
+
+    #         for reply in get_thread_replies(syn, thread["id"]):
+    #             # url = _get_message_url(syn, reply['messageKey'], 'reply')
+    #             # response = _get_text(url)
+    #             text = get_text(syn, reply["messageKey"], "reply")
+    #             reply_author = syn.getUserProfile(reply["createdBy"]).userName
+    #             thread_f.write(f"Reply: {reply_author}")
+    #             thread_f.write("\n")
+    #             thread_f.write(text)
+    #             thread_f.write("\n")
+    with open("genie_discussion.txt", "w") as thread_f:
+        for thread in get_forum_threads(syn, forum["id"]):
+            # url = _get_message_url(syn, thread['messageKey'], 'thread')
+            # response = _get_text(url)
+            text = get_text(syn, thread["messageKey"], "thread")
             author = syn.getUserProfile(thread["createdBy"]).userName
             thread_f.write(f"Thread: {author}")
             thread_f.write("\n")
