@@ -80,7 +80,7 @@ with autogen.coding.DockerCommandLineCodeExecutor(work_dir="coding") as code_exe
                 file_content = file.read()
         except FileNotFoundError:
             file_content = "No data found."
-        return "Take the following csv and create a new one by filling in the null, nan, empty, or None values with information available to you about project GENIE.  You can infer the data type from the filename. \n Data: \n" + file_content
+        return "Take the following data and create a csv by filling in the null, nan, empty, or None values with information available to you about project GENIE.  You can infer the data type from the filename. \n Data: \n {" + file_content + "}"
 
 
     initializer = autogen.UserProxyAgent(
