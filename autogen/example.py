@@ -21,9 +21,9 @@ config_list = [
 ]
 
 # Setting up the code executor
-# workdir = Path("coding")
-# workdir.mkdir(exist_ok=True)
-# code_executor = LocalCommandLineCodeExecutor(work_dir=workdir)
+workdir = Path("coding")
+workdir.mkdir(exist_ok=True)
+code_executor = LocalCommandLineCodeExecutor(work_dir=workdir)
 
 # # Setting up the agents
 
@@ -57,83 +57,84 @@ IMPORTANT: Wait for the user to execute your code and then you can reply with th
 # create an AssistantAgent named "assistant"
 
 
-with autogen.coding.DockerCommandLineCodeExecutor(work_dir="coding") as code_executor:
+# Comment out docker executor first because we may need to install pandas...
+# with autogen.coding.DockerCommandLineCodeExecutor(work_dir="coding") as code_executor:
 
-    # create a UserProxyAgent instance named "user_proxy"
-    user_proxy = UserProxyAgent(
-        name="user_proxy",
-        human_input_mode="NEVER",
-        max_consecutive_auto_reply=10,
-        is_termination_msg=lambda x: x.get("content", "").rstrip().endswith("TERMINATE"),
-        code_execution_config={
-            # the executor to run the generated code
-            "executor": code_executor,
-        },
-        system_message=system_message
-    )
+# create a UserProxyAgent instance named "user_proxy"
+user_proxy = UserProxyAgent(
+    name="user_proxy",
+    human_input_mode="NEVER",
+    max_consecutive_auto_reply=10,
+    is_termination_msg=lambda x: x.get("content", "").rstrip().endswith("TERMINATE"),
+    code_execution_config={
+        # the executor to run the generated code
+        "executor": code_executor,
+    },
+    system_message=system_message
+)
 
-    def my_message_generator(sender, recipient, context):
-        # your CSV file
-        file_name = context.get("file_name")
-        try:
-            with open(file_name, mode="r", encoding="utf-8") as file:
-                file_content = file.read()
-        except FileNotFoundError:
-            file_content = "No data found."
-        return "Take the following data and create a csv by filling in the null, nan, empty, or None values with information available to you about project GENIE.  You can infer the data type from the filename. \n Data: \n {" + file_content + "}"
+def my_message_generator(sender, recipient, context):
+    # your CSV file
+    file_name = context.get("file_name")
+    try:
+        with open(file_name, mode="r", encoding="utf-8") as file:
+            file_content = file.read()
+    except FileNotFoundError:
+        file_content = "No data found."
+    return "Take the following data and create a csv by filling in the null, nan, empty, or None values with information available to you about project GENIE.  You can infer the data type from the filename. \n Data: \n {" + file_content + "}"
 
 
-    initializer = autogen.UserProxyAgent(
-        name="Init",
-    )
-    coder = autogen.AssistantAgent(
-        name="Retrieve_Action_1",
-        llm_config=llm_config,
-        system_message="""
-        You are the Coder. Given a csv, you will fill in all the null, nan, empty, or None values with information available to you.
-        You write python/shell code to solve tasks. Wrap the code in a code block that specifies the script type. The user can't modify your code. So do not suggest incomplete code which requires others to modify. Don't use a code block if it's not intended to be executed by the executor.
-        Don't include multiple code blocks in one response. Do not ask others to copy and paste the result. Check the execution result returned by the executor.
-        If the result indicates there is an error, fix the error and output the code again. Suggest the full code instead of partial code or code changes. If the error can't be fixed or if the task is not solved even after the code is executed successfully, analyze the problem, revisit your assumption, collect additional info you need, and think of a different approach to try.
-        """,
-    )
-    data_curator = AssistantAgent(
-        name="data_curator",
-        llm_config=llm_config,
-        system_message="""
-        You are a data curator, please ensure that there are no typos. If there are any blank values, fill it in.  Standardize any values.
-        """
-    )
+initializer = autogen.UserProxyAgent(
+    name="Init",
+)
+coder = autogen.AssistantAgent(
+    name="Retrieve_Action_1",
+    llm_config=llm_config,
+    system_message="""
+    You are the Coder. Given a csv, you will fill in all the null, nan, empty, or None values with information available to you.
+    You write python/shell code to solve tasks. Wrap the code in a code block that specifies the script type. The user can't modify your code. So do not suggest incomplete code which requires others to modify. Don't use a code block if it's not intended to be executed by the executor.
+    Don't include multiple code blocks in one response. Do not ask others to copy and paste the result. Check the execution result returned by the executor.
+    If the result indicates there is an error, fix the error and output the code again. Suggest the full code instead of partial code or code changes. If the error can't be fixed or if the task is not solved even after the code is executed successfully, analyze the problem, revisit your assumption, collect additional info you need, and think of a different approach to try.
+    """,
+)
+data_curator = AssistantAgent(
+    name="data_curator",
+    llm_config=llm_config,
+    system_message="""
+    You are a data curator, please ensure that there are no typos. If there are any blank values, fill it in.  Standardize any values.
+    """
+)
 
-    def state_transition(last_speaker, groupchat):
-        messages = groupchat.messages
+def state_transition(last_speaker, groupchat):
+    messages = groupchat.messages
 
-        if last_speaker is initializer:
-            # init -> retrieve
+    if last_speaker is initializer:
+        # init -> retrieve
+        return coder
+    elif last_speaker is coder:
+        # retrieve: action 1 -> action 2
+        return user_proxy
+    elif last_speaker is user_proxy:
+        if messages[-1]["content"] == "exitcode: 1":
+            # retrieve --(execution failed)--> retrieve
             return coder
-        elif last_speaker is coder:
-            # retrieve: action 1 -> action 2
-            return user_proxy
-        elif last_speaker is user_proxy:
-            if messages[-1]["content"] == "exitcode: 1":
-                # retrieve --(execution failed)--> retrieve
-                return coder
-            else:
-                # retrieve --(execution success)--> research
-                return data_curator
-        elif last_speaker == "data_curator":
-            # research -> end
-            return None
+        else:
+            # retrieve --(execution success)--> research
+            return data_curator
+    elif last_speaker == "data_curator":
+        # research -> end
+        return None
 
-    groupchat = autogen.GroupChat(
-        agents=[initializer, coder, user_proxy, data_curator],
-        messages=[],
-        max_round=10,
-        speaker_selection_method=state_transition,
-    )
-    manager = autogen.GroupChatManager(groupchat=groupchat, llm_config=llm_config)
+groupchat = autogen.GroupChat(
+    agents=[initializer, coder, user_proxy, data_curator],
+    messages=[],
+    max_round=10,
+    speaker_selection_method=state_transition,
+)
+manager = autogen.GroupChatManager(groupchat=groupchat, llm_config=llm_config)
 
-    initializer.initiate_chat(
-        manager,
-        message=my_message_generator,
-        file_name="coding/genie_portal.csv",
-    )
+initializer.initiate_chat(
+    manager,
+    message=my_message_generator,
+    file_name="coding/genie_portal.csv",
+)
